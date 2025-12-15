@@ -1,73 +1,114 @@
-# React + TypeScript + Vite
+# GazeBoard: Baseline Bayesian Gaze Typing Interface
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This project implements a web-based, eye-gaze controlled keyboard using React and the GazeCloudAPI. It utilizes a **Bayesian Inference** framework to interpret noisy eye-tracking data and determine user intent.
 
-Currently, two official plugins are available:
+**Note:** This specific implementation represents the **Baseline Control** logic. It replicates traditional dwell-based and probability-based methods (standard BayesGaze) _without_ velocity detection, dynamic zooming, or single-key accumulation, serving as a standard for performance comparison.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 📂 Project Structure
 
-## React Compiler
+The codebase is organized to separate data definitions, logic hooks, and UI components.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **`constants/`**
+  - Contains constant definitions related to the key layout (QWERTY grids), key dimensions, and configuration flags.
+- **`hooks/`**
+  - Contains custom React hooks, specifically helper functions for integration and auto-correction suggestions.
+- **`types/`**
+  - Contains TypeScript definitions for the application, including `KeyDef` (static key properties) and `KeyState` (dynamic probability values).
+- **`components/`**
+  - Contains the main logic and UI components, primarily `GazeTracking.tsx`.
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 🧠 Core Component: `GazeTracking.tsx`
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+This file is the engine of the application. It handles the eye-tracking lifecycle, signal processing, and the continuous Bayesian update loop. Below is a breakdown of its internal logic:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### 1. State Management & Interfaces
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+The component manages two distinct types of state:
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+- **React State:** Handles UI updates (active key highlighting, text input, calibration status).
+- **Ref State (`useRef`):** Handles high-frequency data that changes every frame (30-60Hz) to avoid React render cycle overhead. This includes:
+  - **`KeyDef`**: Static properties (Label, ID, Special roles).
+  - **`KeyState`**: Dynamic properties used for the Bayesian calculation:
+    - `interest`: The accumulated "dwell" probability mass.
+    - `selectionCount`: Used to update Priors (frequency of use).
+    - `prior`: The probability of a key being pressed based on past history.
+    - `rect`: Cached DOM coordinates for efficient hit-testing.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 2. Input Layer (GazeCloudAPI)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+The component bridges the React lifecycle with the external `GazeCloudAPI`.
+
+- **Initialization**: Injects the API script and manages the calibration UI overlay.
+- **Data Flow**: Receives raw `(x, y)` screen coordinates via the `OnResult` callback.
+
+### 3. Smoothing Layer (Signal Processing)
+
+Because webcam-based eye tracking contains significant jitter ("noise"), raw data must be smoothed before processing.
+
+- **Algorithm**: Weighted Exponential Moving Average (EMA).
+- **Baseline Configuration**:
+  - `GAZE_HISTORY_SIZE = 8`: Uses a large buffer of past frames.
+  - `GAZE_SMOOTHING_ALPHA = 0.15`: Uses a low alpha, resulting in heavy smoothing. This makes the cursor stable but less responsive (laggy) compared to velocity-aware methods.
+
+### 4. Bayesian Inference Engine (The Math)
+
+The core logic runs inside a `requestAnimationFrame` loop to ensure smooth performance. It calculates $P(Key | Gaze)$—the probability that the user wants to select a specific Key given their Gaze point.
+
+1.  **Likelihood Calculation ($P(Gaze | Key)$):**
+
+    - Models the user's gaze spread as a **Gaussian distribution**.
+    - Calculates the distance between the smoothed gaze point and the center of every key.
+    - Uses a fixed `SIGMA_RATIO` (0.5) to determine the "spread" of the gaze.
+
+2.  **Prior Updates ($P(Key)$):**
+
+    - Uses a Dirichlet-style update. Keys that are selected more frequently effectively become "larger" targets in the probability space.
+
+3.  **Posterior Calculation & Interest Accumulation:**
+
+    - **Normalization**: Converts likelihoods into probabilities that sum to 1.0 across all keys.
+    - **Accumulation (The Baseline Flaw)**: In this traditional model, **every key** accumulates `interest` proportional to its posterior probability every frame. This leads to the "Midas Touch" problem where looking across the keyboard accidentally activates keys along the path.
+
+4.  **Selection Trigger**:
+    - When a key's accumulated `interest` exceeds `SELECTION_THRESHOLD` (1.0 seconds), a selection event is triggered.
+
+### 5. Rendering & Feedback
+
+- **Visuals**: Keys glow blue based on their current `interest` level.
+- **Cursor**: A semi-transparent red cursor visualizes the smoothed gaze location.
+- **Optimization**: Uses direct DOM manipulation via refs for high-performance animations, bypassing React's virtual DOM for the 60fps cursor updates.
+
+---
+
+## ⚙️ Configuration Constants (Baseline)
+
+These parameters define the behavior of the "Control Group" implementation:
+
+| Constant               | Value  | Description                                         |
+| :--------------------- | :----- | :-------------------------------------------------- |
+| `SIGMA_RATIO`          | `0.5`  | Standard deviation relative to key size.            |
+| `SELECTION_THRESHOLD`  | `1.0`  | Requires 1.0s of focus to click (Standard Dwell).   |
+| `GAZE_SMOOTHING_ALPHA` | `0.15` | High smoothing factor (results in sluggish cursor). |
+| `PRIOR_K`              | `1.0`  | Dirichlet pseudocount for priors.                   |
+
+## 🚀 Getting Started
+
+1.  **Install Dependencies:**
+
+    ```bash
+    npm install
+    ```
+
+2.  **Run Development Server:**
+
+    ```bash
+    npm run dev
+    ```
+
+3.  **Usage:**
+    - Grant camera permissions.
+    - Follow the red dot for calibration.
+    - **To Type**: Look at a key. The blue border indicates interest accumulation. Hold your gaze until the key flashes green.
+    - **Correction**: Use the blank key next to Space for word suggestions.
