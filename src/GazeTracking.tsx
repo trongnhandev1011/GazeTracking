@@ -120,14 +120,27 @@ export default function GazeKeyboard() {
 
   useEffect(() => {
     if (!typoRef.current) {
-      try {
-        // @ts-ignore
-        typoRef.current = new (dictionary as any)("en_US", null, null, {
-          dictionaryPath: "./public/dictionaries",
-        });
-      } catch (e) {
-        console.error("Failed to initialize typo-js dictionary", e);
-      }
+      const loadDictionary = async () => {
+        try {
+          // 1. Fetch the files from the public folder (note the path starts with /)
+          const affData = await fetch("/dictionaries/en_US/en_US.aff").then(
+            (res) => res.text()
+          );
+          const dicData = await fetch("/dictionaries/en_US/en_US.dic").then(
+            (res) => res.text()
+          );
+
+          // 2. Initialize Typo with the DATA, not the path
+          // @ts-ignore
+          typoRef.current = new dictionary("en_US", affData, dicData);
+
+          console.log("Dictionary loaded successfully!");
+        } catch (e) {
+          console.error("Failed to load dictionary:", e);
+        }
+      };
+
+      loadDictionary();
     }
   }, []);
 
