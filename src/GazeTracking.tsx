@@ -123,7 +123,7 @@ export default function GazeKeyboard() {
       try {
         // @ts-ignore
         typoRef.current = new (dictionary as any)("en_US", null, null, {
-          dictionaryPath: "/node_modules/typo-js/dictionaries",
+          dictionaryPath: "./public/dictionaries",
         });
       } catch (e) {
         console.error("Failed to initialize typo-js dictionary", e);
