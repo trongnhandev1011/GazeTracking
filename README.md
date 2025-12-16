@@ -4,6 +4,8 @@ This project implements a web-based, eye-gaze controlled keyboard using React an
 
 **Note:** This specific implementation represents the **Baseline Control** logic. It replicates traditional dwell-based and probability-based methods (standard BayesGaze) _without_ velocity detection, dynamic zooming, or single-key accumulation, serving as a standard for performance comparison.
 
+Deployment link: https://my-vite-etln2ivha-trongnhandev1011s-projects.vercel.app/
+
 ## 📂 Project Structure
 
 The codebase is organized to separate data definitions, logic hooks, and UI components.
